@@ -1,0 +1,364 @@
+{
+  "name": "Floppy · Buscar (búsqueda semántica + respuesta)",
+  "nodes": [
+    {
+      "id": "581c3c72-a1c9-5c2f-85e3-0c45dc81364c",
+      "name": "Entrada desde la app",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "eb0f9c5e-1e71-5825-9593-4f94b3cb4e3c",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "floppy-buscar",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "d8ef2533-a4ab-592b-bd83-6bc378956a06",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Datos de tu proyecto. Es el único nodo que hay que editar después de importar.\n// La anon key de Supabase es pública (la usa también la app): no es un secreto.\n// La clave de Gemini NO va acá: va en la credencial \"Gemini\" de n8n.\nconst config = {\n  supabaseUrl: 'https://TU-PROYECTO.supabase.co',\n  supabaseAnonKey: 'TU-ANON-KEY',\n  model: 'gemini-flash-latest',\n  embeddingModel: 'gemini-embedding-001',\n};\nreturn { json: { ...$json, config } };\n"
+      }
+    },
+    {
+      "id": "d5f315b7-2a9a-5316-8308-02b8da6c6482",
+      "name": "Validar sesión",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.config.supabaseUrl }}/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.config.supabaseAnonKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $json.headers.authorization ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d1310724-7fb1-59cc-a1b0-bf4fe89287f5",
+      "name": "¿Sesión válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ca7e5db6-5d20-5683-8a74-7c023888b6be",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f22bc254-e6ef-5418-a04e-1dca8b0c5779",
+      "name": "Sin sesión",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: \"Sesión inválida o vencida\" }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "27f5a248-d621-5260-a74f-a12d636d77b4",
+      "name": "Pregunta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Toma la pregunta y arma el pedido de embedding para buscar por significado.\nconst req = $('Entrada desde la app').item.json;\nconst user = $json.body ? JSON.parse($json.body) : {};\nconst q = String(req.body?.q ?? '').trim();\nif (!q) throw new Error('Falta q: lo que se busca');\nconst { embeddingModel } = $('Configuración').item.json.config;\nreturn {\n  json: {\n    user_id: user.id,\n    q,\n    embeddingModel,\n    request: {\n      model: `models/${embeddingModel}`,\n      content: { parts: [{ text: q }] },\n      taskType: 'RETRIEVAL_QUERY',\n      outputDimensionality: 768,\n    },\n  },\n};\n"
+      }
+    },
+    {
+      "id": "583972aa-cbd0-5908-b7ff-f994b4e3b02e",
+      "name": "Embedding de la pregunta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json.embeddingModel }}:embedContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "af6b5be5-ec11-594c-b7f6-ba52623dcefc",
+      "name": "Vector",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Deja el vector de la pregunta como texto que Postgres entiende: [0.1,0.2,...]\nconst p = $('Pregunta').item.json;\nreturn { json: { user_id: p.user_id, q: p.q, vector: `[${$json.embedding.values.join(',')}]` } };\n"
+      }
+    },
+    {
+      "id": "9eb5489b-4803-5014-939b-dd8bff0d5ef6",
+      "name": "Buscar en Supabase",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1540,
+        -20
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with q as (select $1::vector as v)\nselect * from (\n  select 'task' as type, id, title, coalesce(notes, '') as detail, due_date::text as date, embedding <=> q.v as distance\n  from tasks, q where user_id = $2::uuid and embedding is not null\n  union all\n  select 'expense', id, coalesce(merchant, category), category || ' · ' || currency || ' ' || amount::text, spent_on::text, embedding <=> q.v\n  from expenses, q where user_id = $2::uuid and embedding is not null\n  union all\n  select 'saved', id, title, coalesce(summary, ''), created_at::date::text, embedding <=> q.v\n  from saved, q where user_id = $2::uuid and embedding is not null\n) r\nwhere distance < 0.6\norder by distance\nlimit 8;",
+        "options": {
+          "queryReplacement": "={{ $json.vector }},{{ $json.user_id }}"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "75c99853-162c-5077-8f06-ddb8e6372010",
+      "name": "Armar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Con lo encontrado, le pide a Gemini una respuesta corta, solo a partir de eso (RAG).\nconst { model } = $('Configuración').item.json.config;\nconst q = $('Pregunta').item.json.q;\nconst hoy = $now.setZone('America/Argentina/Buenos_Aires').toISODate();\nconst encontrados = $input.all().map((it) => it.json).filter((r) => r.type);\nconst contexto = encontrados\n  .map((r, i) => `[${i + 1}] (${r.type}) ${r.title} — ${r.detail} — ${r.date ?? ''}`)\n  .join('\\n');\nconst prompt = `Eres el buscador de Floppy. Hoy es ${hoy}.\nLa persona pregunta: \"${q}\"\nEstas son sus cosas guardadas que más se parecen a la pregunta (tareas, gastos y guardados):\n${contexto || '(no hay nada guardado que se parezca)'}\n\nResponde en español, en una o dos frases, usando SOLO esa información. Si suman montos, haz la cuenta.\nSi no alcanza para responder, dilo con honestidad. No inventes.`;\nreturn [{\n  json: {\n    model,\n    results: encontrados,\n    request: { contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } },\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "ce3c9ca2-b628-5fdc-b5b0-ed02b9b5a1f4",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json.model }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "cc6667d3-a7a1-5247-a2ac-c8ffbc9502be",
+      "name": "Responder a la app",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        -20
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, answer: ($json.candidates?.[0]?.content?.parts ?? []).map(p => p.text ?? '').join('').trim(), results: $('Armar respuesta').item.json.results.map(({ distance, ...r }) => r) }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Entrada desde la app": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Validar sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar sesión": {
+      "main": [
+        [
+          {
+            "node": "¿Sesión válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Sesión válida?": {
+      "main": [
+        [
+          {
+            "node": "Pregunta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pregunta": {
+      "main": [
+        [
+          {
+            "node": "Embedding de la pregunta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embedding de la pregunta": {
+      "main": [
+        [
+          {
+            "node": "Vector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector": {
+      "main": [
+        [
+          {
+            "node": "Buscar en Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar en Supabase": {
+      "main": [
+        [
+          {
+            "node": "Armar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Responder a la app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

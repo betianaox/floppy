@@ -1,0 +1,504 @@
+{
+  "name": "Floppy · Entrada (voz, foto, texto o enlace)",
+  "nodes": [
+    {
+      "id": "3188d613-34fd-5bcd-bc11-63a00ae4c2f5",
+      "name": "Entrada desde la app",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b109f643-bb66-56eb-8ae4-5b2f7658abca",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "floppy",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "d8ef2533-a4ab-592b-bd83-6bc378956a06",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Datos de tu proyecto. Es el único nodo que hay que editar después de importar.\n// La anon key de Supabase es pública (la usa también la app): no es un secreto.\n// La clave de Gemini NO va acá: va en la credencial \"Gemini\" de n8n.\nconst config = {\n  supabaseUrl: 'https://TU-PROYECTO.supabase.co',\n  supabaseAnonKey: 'TU-ANON-KEY',\n  model: 'gemini-flash-latest',\n  embeddingModel: 'gemini-embedding-001',\n};\nreturn { json: { ...$json, config } };\n"
+      }
+    },
+    {
+      "id": "d5f315b7-2a9a-5316-8308-02b8da6c6482",
+      "name": "Validar sesión",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.config.supabaseUrl }}/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.config.supabaseAnonKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $json.headers.authorization ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d1310724-7fb1-59cc-a1b0-bf4fe89287f5",
+      "name": "¿Sesión válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ca7e5db6-5d20-5683-8a74-7c023888b6be",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f22bc254-e6ef-5418-a04e-1dca8b0c5779",
+      "name": "Sin sesión",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: \"Sesión inválida o vencida\" }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "4c262bf5-8880-5bde-9085-57f936e364ad",
+      "name": "Normalizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Junta en un solo objeto quién es la persona (validado por Supabase) y qué mandó.\nconst req = $('Entrada desde la app').item.json;\nconst body = req.body ?? {};\nconst user = $json.body ? JSON.parse($json.body) : {};\nconst kind = body.kind;\nif (!['audio', 'image', 'text', 'link'].includes(kind)) {\n  throw new Error('kind tiene que ser audio, image, text o link');\n}\nconst tz = body.tz || 'America/Argentina/Buenos_Aires';\nreturn {\n  json: {\n    user_id: user.id,\n    kind,\n    text: body.text ?? '',\n    url: body.url ?? null,\n    data: body.data ?? null,\n    mimeType: body.mimeType ?? null,\n    photo_path: body.photoPath ?? null,\n    tz,\n    today: body.today || $now.setZone(tz).toISODate(),\n  },\n};\n"
+      }
+    },
+    {
+      "id": "ca826c83-ae4b-581b-8bb0-495136396bbf",
+      "name": "¿Es un enlace?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -20
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4e3ebeac-872d-54c9-bbc4-6a384367d20d",
+              "leftValue": "={{ $json.kind }}",
+              "rightValue": "link",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10cf3944-7ba6-5f05-95cd-9b55688aec80",
+      "name": "Leer la página",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -180
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "a379f2b1-2c15-51dd-b667-4e4abc9af1ea",
+      "name": "Extraer de la página",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -180
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Saca de la página lo que sirve para entenderla: título, descripción y algo de texto.\nconst pedido = $('Normalizar').item.json;\nconst html = typeof $json.body === 'string' ? $json.body : '';\nconst meta = (name) => {\n  const re = new RegExp(`<meta[^>]+(?:property|name)=[\"']${name}[\"'][^>]*content=[\"']([^\"']*)[\"']`, 'i');\n  const re2 = new RegExp(`<meta[^>]+content=[\"']([^\"']*)[\"'][^>]*(?:property|name)=[\"']${name}[\"']`, 'i');\n  return (html.match(re) || html.match(re2) || [])[1] || '';\n};\nconst title = meta('og:title') || (html.match(/<title[^>]*>([^<]*)<\\/title>/i) || [])[1] || '';\nconst description = meta('og:description') || meta('description');\nconst texto = html\n  .replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim()\n  .slice(0, 6000);\nreturn {\n  json: {\n    ...pedido,\n    page: { ok: $json.statusCode >= 200 && $json.statusCode < 400, title, description, image: meta('og:image'), text: texto },\n  },\n};\n"
+      }
+    },
+    {
+      "id": "b8fb680a-bdae-598a-bcd0-d669d724bc41",
+      "name": "Armar pedido a Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Arma el pedido a Gemini: un audio, una foto, un texto o un enlace ya leído.\nconst p = $json;\nconst { model } = $('Configuración').item.json.config;\n\nconst instrucciones = `Eres el asistente de Floppy, una app que convierte lo que la persona dice, fotografía o comparte en TAREAS, GASTOS y GUARDADOS.\nHoy es ${p.today} (zona horaria ${p.tz}). Moneda por defecto: pesos argentinos (ARS).\n\nQué va en cada lista:\n- tasks: algo que la persona tiene que hacer. Título corto en infinitivo (\"Llamar al contador\"). Si menciona un día (\"mañana\", \"el jueves\", \"el 15\"), due_date en AAAA-MM-DD; si no, null.\n- expenses: plata que ya se gastó. amount es un número sin símbolos ni separadores de miles. category es una de: Supermercado, Comida, Transporte, Hogar, Servicios, Salud, Mascotas, Ropa, Ocio, Otros.\n- saved: algo para recordar o volver a ver que no es una tarea ni un gasto: una idea, una receta, un dato, un lugar, un enlace, una foto que interesa.\n  kind es \"note\" (texto o audio), \"link\" (enlace) o \"photo\" (imagen que no es un ticket).\n  title corto y claro; summary de una o dos frases; tags: entre 1 y 4 etiquetas en minúscula (\"receta\", \"viaje\", \"trabajo\").\n\nReglas:\n- Una misma entrada puede dejar cosas en varias listas (\"mañana llamar al contador y gasté 12000 en el súper\" = 1 tarea + 1 gasto).\n- La foto de un ticket o factura es UN gasto con el comercio, el total, la fecha del ticket y los ítems que se lean. No es un guardado.\n- La foto de un papel con anotaciones son tareas o notas, según lo que diga.\n- Un enlace siempre deja un guardado kind \"link\", resumiendo de qué trata la página.\n- No inventes nada que no esté. Si una lista no tiene nada, devuélvela vacía.\n- transcript: lo que dijo la persona (audio) o lo que se lee (imagen), resumido si es largo.\n- summary: una frase corta, en español, de lo que hiciste (\"Agendé 1 tarea y anoté 1 gasto\").`;\n\nconst parts = [{ text: instrucciones }];\nif (p.kind === 'text') {\n  parts.push({ text: `Texto de la persona: ${p.text}` });\n} else if (p.kind === 'link') {\n  const pg = p.page ?? {};\n  parts.push({\n    text: `Enlace compartido: ${p.url}\\nComentario de la persona: ${p.text || '(ninguno)'}\\n` +\n      (pg.ok ? `Título: ${pg.title}\\nDescripción: ${pg.description}\\nTexto de la página: ${pg.text}` : 'No se pudo leer la página: resume a partir del enlace.'),\n  });\n} else {\n  if (!p.data || !p.mimeType) throw new Error('Faltan data (base64) o mimeType');\n  parts.push({ inline_data: { mime_type: p.mimeType, data: p.data } });\n  if (p.text) parts.push({ text: `Comentario de la persona: ${p.text}` });\n}\n\nconst S = (extra = {}) => ({ type: 'STRING', ...extra });\nconst schema = {\n  type: 'OBJECT',\n  properties: {\n    transcript: S(),\n    summary: S(),\n    tasks: { type: 'ARRAY', items: { type: 'OBJECT', properties: { title: S(), due_date: S({ nullable: true }), notes: S({ nullable: true }) }, required: ['title'] } },\n    expenses: {\n      type: 'ARRAY',\n      items: {\n        type: 'OBJECT',\n        properties: {\n          merchant: S({ nullable: true }), amount: { type: 'NUMBER' }, currency: S(), category: S(), spent_on: S({ nullable: true }),\n          items: { type: 'ARRAY', nullable: true, items: { type: 'OBJECT', properties: { name: S(), amount: { type: 'NUMBER', nullable: true } } } },\n        },\n        required: ['amount', 'category'],\n      },\n    },\n    saved: {\n      type: 'ARRAY',\n      items: {\n        type: 'OBJECT',\n        properties: { kind: S({ enum: ['note', 'link', 'photo'] }), title: S(), summary: S({ nullable: true }), content: S({ nullable: true }), tags: { type: 'ARRAY', items: S() } },\n        required: ['kind', 'title'],\n      },\n    },\n  },\n  required: ['transcript', 'summary', 'tasks', 'expenses', 'saved'],\n};\n\nreturn {\n  json: {\n    model,\n    request: { contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.2 } },\n  },\n};\n"
+      }
+    },
+    {
+      "id": "ce3c9ca2-b628-5fdc-b5b0-ed02b9b5a1f4",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $json.model }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "f852863c-f09a-5433-aaca-5ccd88dbfa51",
+      "name": "Leer respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Lee la respuesta de Gemini, la limpia y prepara los textos para los embeddings.\n// Si era un enlace, el pedido viene de \"Extraer de la página\"; si no, de \"Normalizar\".\nconst p = $('Extraer de la página').isExecuted ? $('Extraer de la página').item.json : $('Normalizar').item.json;\nconst { embeddingModel } = $('Configuración').item.json.config;\nconst raw = $json.candidates?.[0]?.content?.parts?.map((x) => x.text ?? '').join('') ?? '';\nlet d;\ntry { d = JSON.parse(raw); } catch { throw new Error('Gemini no devolvió un JSON válido: ' + raw.slice(0, 200)); }\n\nconst fecha = (v) => (typeof v === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(v) ? v : null);\nconst CATS = ['Supermercado', 'Comida', 'Transporte', 'Hogar', 'Servicios', 'Salud', 'Mascotas', 'Ropa', 'Ocio', 'Otros'];\n\nconst tasks = (d.tasks ?? []).filter((t) => t.title?.trim())\n  .map((t) => ({ title: t.title.trim(), due_date: fecha(t.due_date), notes: t.notes || null }));\n\nconst expenses = (d.expenses ?? []).filter((g) => Number.isFinite(Number(g.amount)) && Number(g.amount) >= 0)\n  .map((g) => ({\n    merchant: g.merchant || null,\n    amount: Number(g.amount),\n    currency: (g.currency || 'ARS').toUpperCase().slice(0, 3),\n    category: CATS.includes(g.category) ? g.category : 'Otros',\n    spent_on: fecha(g.spent_on),\n    items: g.items?.length ? g.items : null,\n    // La foto del ticket queda con el gasto.\n    photo_path: p.kind === 'image' ? p.photo_path : null,\n  }));\n\nconst saved = (d.saved ?? []).filter((s) => s.title?.trim())\n  .map((s) => ({\n    kind: ['note', 'link', 'photo'].includes(s.kind) ? s.kind : 'note',\n    title: s.title.trim(),\n    summary: s.summary || null,\n    content: s.content || null,\n    url: p.kind === 'link' ? p.url : null,\n    photo_path: s.kind === 'photo' ? p.photo_path : null,\n    tags: (s.tags ?? []).map((t) => String(t).toLowerCase().trim()).filter(Boolean).slice(0, 4),\n  }));\n// Un enlace siempre queda guardado, aunque el modelo no lo haya puesto.\nif (p.kind === 'link' && !saved.some((s) => s.kind === 'link')) {\n  saved.push({ kind: 'link', title: p.page?.title || p.url, summary: p.page?.description || null, content: null, url: p.url, photo_path: null, tags: [] });\n}\n\n// Texto que representa cada cosa para buscarla después por significado.\nconst textos = [\n  ...tasks.map((t) => `Tarea: ${t.title}. ${t.notes ?? ''} ${t.due_date ?? ''}`),\n  ...expenses.map((g) => `Gasto: ${g.merchant ?? ''} ${g.category} ${g.amount} ${g.currency}. ${(g.items ?? []).map((i) => i.name).join(', ')}`),\n  ...saved.map((s) => `${s.title}. ${s.summary ?? ''} ${s.tags.join(' ')} ${s.url ?? ''}`),\n];\nconst paraEmbeddings = textos.length ? textos : ['(vacío)'];\n\nreturn {\n  json: {\n    user_id: p.user_id,\n    source: p.kind,\n    transcript: d.transcript ?? '',\n    summary: d.summary ?? '',\n    tasks,\n    expenses,\n    saved,\n    embeddingRequest: {\n      requests: paraEmbeddings.map((text) => ({\n        model: `models/${embeddingModel}`,\n        content: { parts: [{ text }] },\n        taskType: 'RETRIEVAL_DOCUMENT',\n        outputDimensionality: 768,\n      })),\n    },\n  },\n};\n"
+      }
+    },
+    {
+      "id": "7712291e-fc6e-537d-b884-a492cdbc24d2",
+      "name": "Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $('Configuración').item.json.config.embeddingModel }}:batchEmbedContents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.embeddingRequest) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "579e846f-f27d-58ea-aea2-e8f98f35d6a9",
+      "name": "Unir embeddings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Le pone a cada tarea, gasto y guardado su vector, en el mismo orden en que se pidieron.\nconst d = $('Leer respuesta').item.json;\nconst vecs = ($json.embeddings ?? []).map((e) => `[${e.values.join(',')}]`);\nlet i = 0;\nconst con = (lista) => lista.map((x) => ({ ...x, embedding: vecs[i++] ?? null }));\nreturn {\n  json: {\n    user_id: d.user_id,\n    source: d.source,\n    transcript: d.transcript,\n    summary: d.summary,\n    tasks: con(d.tasks),\n    expenses: con(d.expenses),\n    saved: con(d.saved),\n  },\n};\n"
+      }
+    },
+    {
+      "id": "e962c771-0a73-5604-8602-8e0a90b61204",
+      "name": "Guardar en Supabase",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2860,
+        -20
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with t as (\n  insert into tasks (user_id, title, due_date, notes, source, embedding)\n  select $4::uuid, title, due_date, notes, $5, embedding::vector\n  from json_to_recordset($1::json) as x(title text, due_date date, notes text, embedding text)\n  returning id\n), e as (\n  insert into expenses (user_id, merchant, amount, currency, category, spent_on, items, photo_path, source, embedding)\n  select $4::uuid, merchant, amount, currency, category, coalesce(spent_on, current_date), items, photo_path, $5, embedding::vector\n  from json_to_recordset($2::json) as x(merchant text, amount numeric, currency text, category text, spent_on date, items jsonb, photo_path text, embedding text)\n  returning id\n), s as (\n  insert into saved (user_id, kind, title, summary, content, url, photo_path, tags, source, embedding)\n  select $4::uuid, kind, title, summary, content, url, photo_path, coalesce(tags, '{}'), $5, embedding::vector\n  from json_to_recordset($3::json) as x(kind text, title text, summary text, content text, url text, photo_path text, tags text[], embedding text)\n  returning id\n)\nselect (select count(*) from t) as tasks, (select count(*) from e) as expenses, (select count(*) from s) as saved;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.tasks) }},{{ JSON.stringify($json.expenses) }},{{ JSON.stringify($json.saved) }},{{ $json.user_id }},{{ $json.source }}"
+        }
+      }
+    },
+    {
+      "id": "cc6667d3-a7a1-5247-a2ac-c8ffbc9502be",
+      "name": "Responder a la app",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        -20
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, summary: $('Unir embeddings').item.json.summary, transcript: $('Unir embeddings').item.json.transcript, tasks: $('Unir embeddings').item.json.tasks.map(({ embedding, ...r }) => r), expenses: $('Unir embeddings').item.json.expenses.map(({ embedding, ...r }) => r), saved: $('Unir embeddings').item.json.saved.map(({ embedding, ...r }) => r) }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Entrada desde la app": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Validar sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar sesión": {
+      "main": [
+        [
+          {
+            "node": "¿Sesión válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Sesión válida?": {
+      "main": [
+        [
+          {
+            "node": "Normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar": {
+      "main": [
+        [
+          {
+            "node": "¿Es un enlace?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es un enlace?": {
+      "main": [
+        [
+          {
+            "node": "Leer la página",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Armar pedido a Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer la página": {
+      "main": [
+        [
+          {
+            "node": "Extraer de la página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer de la página": {
+      "main": [
+        [
+          {
+            "node": "Armar pedido a Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar pedido a Gemini": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Leer respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer respuesta": {
+      "main": [
+        [
+          {
+            "node": "Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Unir embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unir embeddings": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar en Supabase": {
+      "main": [
+        [
+          {
+            "node": "Responder a la app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
