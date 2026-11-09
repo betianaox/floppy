@@ -1,0 +1,75 @@
+{
+  "expo": {
+    "name": "Floppy",
+    "slug": "floppy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "floppy",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.imagostack.floppy"
+    },
+    "android": {
+      "package": "com.imagostack.floppy",
+      "adaptiveIcon": {
+        "backgroundColor": "#F5F2EB",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F5F2EB",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 140
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Floppy usa el micrófono para grabar tus notas de voz."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Floppy usa la cámara para sacar fotos de tickets y de lo que quieras guardar.",
+          "photosPermission": "Floppy usa tus fotos para guardar las que elijas."
+        }
+      ],
+      "expo-localization",
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": [
+            "text/*",
+            "image/*"
+          ],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsImageWithMaxCount": 1
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "owner": "imagostack"
+  }
+}

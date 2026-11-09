@@ -179,3 +179,14 @@ test('la búsqueda encuentra por vector y arma el contexto para la respuesta', a
   assert.match(r.request.contents[0].parts[0].text, /Receta de pan/);
   assert.equal(r.results[0].title, 'Receta de pan');
 });
+
+test('eliminar la cuenta: borra a la dueña de la sesión y arma las rutas de sus fotos', () => {
+  const cuenta = JSON.parse(leer('n8n/floppy-cuenta.json'));
+  const sinConfirmar = { 'Entrada desde la app': { body: { user_id: 'otra-persona' } } };
+  assert.throws(() => correr(cuenta, 'Usuario', sesionOk, sinConfirmar), /confirm/);
+  const prev = { 'Entrada desde la app': { body: { confirm: true, user_id: 'otra-persona' } } };
+  prev['Usuario'] = correr(cuenta, 'Usuario', sesionOk, prev);
+  assert.equal(prev['Usuario'].user_id, USER);
+  const fotos = correr(cuenta, 'Rutas de las fotos', { body: JSON.stringify([{ name: 'a.jpg' }, { name: 'b.jpg' }]) }, prev);
+  assert.deepEqual(fotos.prefixes, [`${USER}/a.jpg`, `${USER}/b.jpg`]);
+});

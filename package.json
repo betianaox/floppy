@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "mobile": "npm run start -w @floppy/mobile",
+    "typecheck": "npm run typecheck -w @floppy/mobile",
     "flujos": "python3 n8n/build.py",
     "test:flujos": "node --test n8n/test/*.test.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.16",
     "@electric-sql/pglite-pgvector": "^0.0.17"
-  }
+  },
+  "workspaces": [
+    "apps/*"
+  ]
 }

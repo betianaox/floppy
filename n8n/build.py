@@ -191,9 +191,50 @@ for a, b in [("Pregunta", "Embedding de la pregunta"), ("Embedding de la pregunt
              ("Buscar en Supabase", "Armar respuesta"), ("Armar respuesta", "Gemini"), ("Gemini", "Responder a la app")]:
     link(bc, a, b)
 
+# ── Eliminar la cuenta (Google Play lo exige) ─────────────────────────────
+def service_http(name, method, url, pos, body=None):
+    """Llamada a Supabase con la clave de servicio (credencial Custom Auth "Supabase servicio")."""
+    p = {"method": method, "url": url, "authentication": "genericCredentialType", "genericAuthType": "httpCustomAuth",
+         "options": {"response": {"response": {"fullResponse": True, "neverError": True, "responseFormat": "text"}}}}
+    if body:
+        p.update({"sendBody": True, "specifyBody": "json", "jsonBody": body})
+    return {"id": nid(name), "name": name, "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": pos, "parameters": p}
+
+
+URL = "{{ $('Configuración').item.json.config.supabaseUrl }}"
+cuenta_nodes = [
+    webhook("Entrada desde la app", "floppy-cuenta", [0, 0]),
+    code("Configuración", "config.js", [220, 0]),
+    validar_sesion([440, 0]),
+    if_node("¿Sesión válida?", "={{ $json.statusCode }}", "equals", 200, [660, 0], "number"),
+    {**NO_AUTORIZADO, "position": [880, 200]},
+    code("Usuario", "cuenta-usuario.js", [880, -20]),
+    service_http("Listar fotos", "POST", f"={URL}/storage/v1/object/list/photos", [1100, -20],
+                 '={{ JSON.stringify({ prefix: $json.user_id + "/", limit: 1000 }) }}'),
+    code("Rutas de las fotos", "cuenta-fotos.js", [1320, -20]),
+    service_http("Borrar fotos", "DELETE", f"={URL}/storage/v1/object/photos", [1540, -20],
+                 '={{ JSON.stringify({ prefixes: $json.prefixes }) }}'),
+    # Al borrar el usuario, Postgres borra sus tareas, gastos y guardados (on delete cascade).
+    service_http("Borrar usuario", "DELETE", f"={URL}/auth/v1/admin/users/{{{{ $('Usuario').item.json.user_id }}}}", [1760, -20]),
+    if_node("¿Se borró?", "={{ $json.statusCode }}", "lt", 300, [1980, -20], "number"),
+    respond("Responder a la app", '={{ JSON.stringify({ ok: true }) }}', [2200, -100]),
+    respond("No se pudo borrar", '={{ JSON.stringify({ ok: false, error: "No se pudo eliminar la cuenta" }) }}', [2200, 100], 500),
+]
+cc = {}
+for a, b in [("Entrada desde la app", "Configuración"), ("Configuración", "Validar sesión"), ("Validar sesión", "¿Sesión válida?")]:
+    link(cc, a, b)
+link(cc, "¿Sesión válida?", "Usuario", 0)
+link(cc, "¿Sesión válida?", "Sin sesión", 1)
+for a, b in [("Usuario", "Listar fotos"), ("Listar fotos", "Rutas de las fotos"), ("Rutas de las fotos", "Borrar fotos"),
+             ("Borrar fotos", "Borrar usuario"), ("Borrar usuario", "¿Se borró?")]:
+    link(cc, a, b)
+link(cc, "¿Se borró?", "Responder a la app", 0)
+link(cc, "¿Se borró?", "No se pudo borrar", 1)
+
 for fname, name, nodes, conn in [
     ("floppy-entrada.json", "Floppy · Entrada (voz, foto, texto o enlace)", entrada_nodes, ec),
     ("floppy-buscar.json", "Floppy · Buscar (búsqueda semántica + respuesta)", buscar_nodes, bc),
+    ("floppy-cuenta.json", "Floppy · Eliminar la cuenta", cuenta_nodes, cc),
 ]:
     wf = {"name": name, "nodes": nodes, "connections": conn, "settings": {"executionOrder": "v1"}, "pinData": {}}
     (HERE / fname).write_text(json.dumps(wf, ensure_ascii=False, indent=2) + "\n")

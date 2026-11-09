@@ -1,0 +1,426 @@
+{
+  "name": "Floppy · Eliminar la cuenta",
+  "nodes": [
+    {
+      "id": "ffb7ada6-93c7-5add-bdab-b245c776d6d3",
+      "name": "Entrada desde la app",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "31c48173-f928-537c-b3c8-f8525a351efc",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "floppy-cuenta",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "d8ef2533-a4ab-592b-bd83-6bc378956a06",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Datos de tu proyecto. Es el único nodo que hay que editar después de importar.\n// La anon key de Supabase es pública (la usa también la app): no es un secreto.\n// La clave de Gemini NO va acá: va en la credencial \"Gemini\" de n8n.\nconst config = {\n  supabaseUrl: 'https://TU-PROYECTO.supabase.co',\n  supabaseAnonKey: 'TU-ANON-KEY',\n  model: 'gemini-flash-latest',\n  embeddingModel: 'gemini-embedding-001',\n};\nreturn { json: { ...$json, config } };\n"
+      }
+    },
+    {
+      "id": "d5f315b7-2a9a-5316-8308-02b8da6c6482",
+      "name": "Validar sesión",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.config.supabaseUrl }}/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.config.supabaseAnonKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $json.headers.authorization ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "d1310724-7fb1-59cc-a1b0-bf4fe89287f5",
+      "name": "¿Sesión válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ca7e5db6-5d20-5683-8a74-7c023888b6be",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f22bc254-e6ef-5418-a04e-1dca8b0c5779",
+      "name": "Sin sesión",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: \"Sesión inválida o vencida\" }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "76db707e-b058-5f78-b077-70bc48dd16e8",
+      "name": "Usuario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// La persona a borrar es la dueña de la sesión: nunca un id que venga en el pedido.\nconst user = $json.body ? JSON.parse($json.body) : {};\nif (!user.id) throw new Error('Sesión sin usuario');\nif ($('Entrada desde la app').item.json.body?.confirm !== true) throw new Error('Falta confirm: true');\nreturn { json: { user_id: user.id } };\n"
+      }
+    },
+    {
+      "id": "58a12a0a-296d-57c0-bf81-30d66273c31f",
+      "name": "Listar fotos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuración').item.json.config.supabaseUrl }}/storage/v1/object/list/photos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prefix: $json.user_id + \"/\", limit: 1000 }) }}"
+      }
+    },
+    {
+      "id": "93216fb6-4239-55bb-85b0-39ff4bbfe3b9",
+      "name": "Rutas de las fotos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Arma la lista de fotos de la persona para borrarlas del almacenamiento.\nconst uid = $('Usuario').item.json.user_id;\nconst lista = Array.isArray($json.body) ? $json.body : (() => { try { return JSON.parse($json.body ?? '[]'); } catch { return []; } })();\nreturn { json: { user_id: uid, prefixes: lista.filter((f) => f.name).map((f) => `${uid}/${f.name}`) } };\n"
+      }
+    },
+    {
+      "id": "9b0078ba-5e0e-578c-bf69-bbc629a5e145",
+      "name": "Borrar fotos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -20
+      ],
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Configuración').item.json.config.supabaseUrl }}/storage/v1/object/photos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prefixes: $json.prefixes }) }}"
+      }
+    },
+    {
+      "id": "dad6791c-f51a-592d-b47b-eef72f9bd76c",
+      "name": "Borrar usuario",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -20
+      ],
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Configuración').item.json.config.supabaseUrl }}/auth/v1/admin/users/{{ $('Usuario').item.json.user_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "f48d02c0-1b8a-5204-b713-1423a0aa55a2",
+      "name": "¿Se borró?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        -20
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3376c8c9-342b-5ba0-8990-34af8523e8fa",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cc6667d3-a7a1-5247-a2ac-c8ffbc9502be",
+      "name": "Responder a la app",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "b26e0a6c-ecf7-5ce3-94da-1f00f41b97ba",
+      "name": "No se pudo borrar",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: \"No se pudo eliminar la cuenta\" }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Entrada desde la app": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Validar sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar sesión": {
+      "main": [
+        [
+          {
+            "node": "¿Sesión válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Sesión válida?": {
+      "main": [
+        [
+          {
+            "node": "Usuario",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin sesión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Usuario": {
+      "main": [
+        [
+          {
+            "node": "Listar fotos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar fotos": {
+      "main": [
+        [
+          {
+            "node": "Rutas de las fotos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rutas de las fotos": {
+      "main": [
+        [
+          {
+            "node": "Borrar fotos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Borrar fotos": {
+      "main": [
+        [
+          {
+            "node": "Borrar usuario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Borrar usuario": {
+      "main": [
+        [
+          {
+            "node": "¿Se borró?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Se borró?": {
+      "main": [
+        [
+          {
+            "node": "Responder a la app",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No se pudo borrar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
